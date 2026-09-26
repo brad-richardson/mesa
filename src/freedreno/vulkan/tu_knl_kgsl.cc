@@ -777,17 +777,35 @@ get_relative_ms(uint64_t abs_timeout_ns)
        */
       return -1;
 
-   uint64_t cur_time_ms = os_time_get_nano() / 1000000;
-   uint64_t abs_timeout_ms = abs_timeout_ns / 1000000;
-   if (abs_timeout_ms <= cur_time_ms)
+   /* Round a future deadline up: a wait with less than 1 ms left must not
+    * turn into timeout 0, which KGSL treats as "wait forever".
+    */
+   uint64_t cur_time_ns = os_time_get_nano();
+   if (abs_timeout_ns <= cur_time_ns)
       return 0;
 
-   return abs_timeout_ms - cur_time_ms;
+   return (int) MIN2(DIV_ROUND_UP(abs_timeout_ns - cur_time_ns, 1000000),
+                     (uint64_t) INT32_MAX);
 }
 
 /* safe_ioctl is not enough as restarted waits would not adjust the timeout
  * which could lead to waiting substantially longer than requested
  */
+/* Non-blocking check that a context timestamp has retired. */
+static VkResult
+poll_timestamp(int fd, unsigned int context_id, unsigned int timestamp)
+{
+   struct kgsl_cmdstream_readtimestamp_ctxtid req = {
+      .context_id = context_id,
+      .type = KGSL_TIMESTAMP_RETIRED,
+   };
+
+   if (safe_ioctl(fd, IOCTL_KGSL_CMDSTREAM_READTIMESTAMP_CTXTID, &req))
+      return VK_TIMEOUT;
+
+   return timestamp_cmp(req.timestamp, timestamp) ? VK_SUCCESS : VK_TIMEOUT;
+}
+
 static VkResult
 wait_timestamp_safe(int fd,
                     unsigned int context_id,
@@ -799,6 +817,13 @@ wait_timestamp_safe(int fd,
       .timestamp = timestamp,
       .timeout = get_relative_ms(abs_timeout_ns),
    };
+
+   /* KGSL treats a timeout of 0 as an infinite wait, so a poll (a deadline
+    * that has already passed, e.g. vk_sync_timeline's garbage collection)
+    * reads the retired timestamp instead of calling WAITTIMESTAMP.
+    */
+   if (wait.timeout == 0)
+      return poll_timestamp(fd, context_id, timestamp);
 
    while (true) {
       int ret = ioctl(fd, IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID, &wait);
