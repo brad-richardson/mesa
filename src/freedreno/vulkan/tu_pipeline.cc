@@ -305,7 +305,34 @@ tu_logic_op_reads_dst(VkLogicOp op)
    }
 }
 
+static bool
+tu_blend_factor_is_inv_src1(VkBlendFactor factor)
+{
+   return factor == VK_BLEND_FACTOR_ONE_MINUS_SRC1_COLOR ||
+          factor == VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA;
+}
+
+/* A blend factor of the form 1 - src1: the draws that misrender in sysmem
+ * on A830 (see use_sysmem_rendering). Plain SRC1_* factors render correctly.
+ */
 bool
+tu_blend_state_uses_inv_src1(const struct vk_color_blend_state *cb)
+{
+   for (unsigned i = 0; i < cb->attachment_count; i++) {
+      const struct vk_color_blend_attachment_state *att = &cb->attachments[i];
+      if (!att->blend_enable)
+         continue;
+      if (tu_blend_factor_is_inv_src1((VkBlendFactor)att->src_color_blend_factor) ||
+          tu_blend_factor_is_inv_src1((VkBlendFactor)att->dst_color_blend_factor) ||
+          tu_blend_factor_is_inv_src1((VkBlendFactor)att->src_alpha_blend_factor) ||
+          tu_blend_factor_is_inv_src1((VkBlendFactor)att->dst_alpha_blend_factor))
+         return true;
+   }
+
+   return false;
+}
+
+static bool
 tu_blend_state_is_dual_src(const struct vk_color_blend_state *cb)
 {
    for (unsigned i = 0; i < cb->attachment_count; i++) {
@@ -4626,8 +4653,8 @@ tu_pipeline_builder_build(struct tu_pipeline_builder *builder,
          vk_pipeline_flags_feedback_loops(builder->graphics_state.pipeline_flags);
       gfx_pipeline->feedback_loop_may_involve_textures =
          builder->graphics_state.feedback_loop_not_input_only;
-      gfx_pipeline->dual_src_blend = builder->graphics_state.cb &&
-         tu_blend_state_is_dual_src(builder->graphics_state.cb);
+      gfx_pipeline->inv_src1_blend = builder->graphics_state.cb &&
+         tu_blend_state_uses_inv_src1(builder->graphics_state.cb);
    }
 
    return VK_SUCCESS;

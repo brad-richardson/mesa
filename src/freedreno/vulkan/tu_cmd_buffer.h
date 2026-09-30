@@ -309,8 +309,8 @@ struct tu_render_pass_state
 {
    bool xfb_used;
    bool has_tess;
-   /* A draw in this render pass uses dual-source blending. */
-   bool has_dual_src_blend;
+   /* A draw in this render pass blends with a ONE_MINUS_SRC1_* factor. */
+   bool has_inv_src1_blend;
    bool has_prim_generated_query_in_rp;
    bool has_vtx_stats_query_in_rp;
    bool has_zpass_done_sample_count_write_in_rp;
@@ -596,7 +596,7 @@ struct tu_cmd_state
    bool pipeline_sysmem_single_prim_mode;
    bool pipeline_has_tess;
    bool pipeline_disable_gmem;
-   bool pipeline_dual_src_blend;
+   bool pipeline_inv_src1_blend;
    bool raster_order_attachment_access;
    bool raster_order_attachment_access_valid;
    bool blit_cache_cleaned;

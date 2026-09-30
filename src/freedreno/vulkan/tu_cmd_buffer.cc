@@ -1434,12 +1434,14 @@ use_sysmem_rendering(struct tu_cmd_buffer *cmd,
       return false;
    }
 
-   /* Dual-source blend draws misrender in sysmem on A830 (PCSX2 HUD glyphs,
-    * ONE / ONE_MINUS_SRC1_COLOR: opaque boxes where the glyph is transparent);
-    * the same draws are exact in GMEM. Prefer GMEM for such passes.
+   /* Draws blending with ONE_MINUS_SRC1_* misrender in sysmem on A830 (PCSX2
+    * HUD glyphs, ONE / ONE_MINUS_SRC1_COLOR: opaque boxes where the glyph is
+    * transparent); the same draws are exact in GMEM. SRC1_* draws are fine in
+    * sysmem, and preferring GMEM for every dual-source pass costs ~3.7x GPU
+    * on PCSX2's copy-road passes. Prefer GMEM only for these passes.
     */
-   if (cmd->state.rp.has_dual_src_blend) {
-      cmd->state.rp.force_render_mode_reason = "Dual-source blending";
+   if (cmd->state.rp.has_inv_src1_blend) {
+      cmd->state.rp.force_render_mode_reason = "ONE_MINUS_SRC1 blending";
       return false;
    }
 
@@ -5539,8 +5541,8 @@ tu_pipeline_update_rp_state(struct tu_cmd_state *cmd_state)
       cmd_state->rp.has_tess = true;
    }
 
-   if (cmd_state->pipeline_dual_src_blend) {
-      cmd_state->rp.has_dual_src_blend = true;
+   if (cmd_state->pipeline_inv_src1_blend) {
+      cmd_state->rp.has_inv_src1_blend = true;
    }
 }
 
@@ -5593,8 +5595,8 @@ tu_CmdBindPipeline(VkCommandBuffer commandBuffer,
    cmd->state.pipeline_sysmem_single_prim_mode = pipeline->prim_order.sysmem_single_prim_mode;
    cmd->state.pipeline_has_tess = pipeline->active_stages & VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
    cmd->state.pipeline_disable_gmem = gfx_pipeline->feedback_loop_may_involve_textures;
-   cmd->state.pipeline_dual_src_blend = gfx_pipeline->dual_src_blend ||
-      tu_blend_state_is_dual_src(&cmd->vk.dynamic_graphics_state.cb);
+   cmd->state.pipeline_inv_src1_blend = gfx_pipeline->inv_src1_blend ||
+      tu_blend_state_uses_inv_src1(&cmd->vk.dynamic_graphics_state.cb);
 
    tu_pipeline_update_rp_state(&cmd->state);
 
@@ -6239,7 +6241,7 @@ tu_render_pass_state_merge(struct tu_render_pass_state *dst,
 {
    dst->xfb_used |= src->xfb_used;
    dst->has_tess |= src->has_tess;
-   dst->has_dual_src_blend |= src->has_dual_src_blend;
+   dst->has_inv_src1_blend |= src->has_inv_src1_blend;
    dst->has_prim_generated_query_in_rp |= src->has_prim_generated_query_in_rp;
    dst->has_vtx_stats_query_in_rp |= src->has_vtx_stats_query_in_rp;
    dst->has_zpass_done_sample_count_write_in_rp |= src->has_zpass_done_sample_count_write_in_rp;
