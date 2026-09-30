@@ -4180,7 +4180,8 @@ tu_emit_draw_state(struct tu_cmd_buffer *cmd)
    emit_draw_state(&cmd->vk.dynamic_graphics_state, tu_##name##_state,        \
                    ARRAY_SIZE(tu_##name##_state))
 #define DRAW_STATE_COND(name, id, extra_cond, ...)                            \
-   if ((EMIT_STATE(name) || (extra_cond)) &&                                  \
+   if ((EMIT_STATE(name) || (extra_cond) ||                                   \
+        (cmd->state.stale_draw_states & (1u << id))) &&                       \
        !(cmd->state.pipeline_draw_states & (1u << id))) {                     \
       unsigned size = tu6_##name##_size<CHIP>(cmd->device, __VA_ARGS__);      \
       if (size > 0) {                                                         \
@@ -4196,7 +4197,8 @@ tu_emit_draw_state(struct tu_cmd_buffer *cmd)
 #define DRAW_STATE_FDM(name, id, ...)                                         \
    if ((EMIT_STATE(name) || (cmd->state.dirty &                               \
                              (TU_CMD_DIRTY_FDM |                              \
-                              TU_CMD_DIRTY_PER_VIEW_VIEWPORT))) &&            \
+                              TU_CMD_DIRTY_PER_VIEW_VIEWPORT)) ||             \
+        (cmd->state.stale_draw_states & (1u << id))) &&                       \
        !(cmd->state.pipeline_draw_states & (1u << id))) {                     \
       if (cmd->state.has_fdm || cmd->state.per_layer_viewport) {              \
          tu_cs_set_writeable(&cmd->sub_cs, true);                             \
@@ -4339,6 +4341,11 @@ tu_emit_draw_state(struct tu_cmd_buffer *cmd)
    }
 #undef DRAW_STATE
 #undef DRAW_STATE_COND
+
+   /* Every stale group is either rebuilt above or statically set by the
+    * bound pipeline now.
+    */
+   cmd->state.stale_draw_states = 0;
 #undef EMIT_STATE
 
    return dirty_draw_states;

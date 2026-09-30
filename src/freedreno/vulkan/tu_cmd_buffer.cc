@@ -5639,6 +5639,8 @@ tu_CmdBindPipeline(VkCommandBuffer commandBuffer,
          tu_cs_emit_draw_state(cs, TU_DRAW_STATE_DYNAMIC + i, pipeline->dynamic_state[i]);
    }
 
+   cmd->state.stale_draw_states |=
+      cmd->state.pipeline_draw_states & ~set_state_mask;
    cmd->state.pipeline_draw_states = set_state_mask;
    u_foreach_bit(i, set_state_mask)
       cmd->state.dynamic_state[i] = pipeline->dynamic_state[i];

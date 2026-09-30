@@ -604,6 +604,13 @@ struct tu_cmd_state
 
    bool pipeline_blend_lrz, pipeline_bandwidth, pipeline_disable_fs;
    uint32_t pipeline_draw_states;
+   /* Dynamic draw-state groups that the previously bound pipeline emitted
+    * statically but the current pipeline leaves dynamic.  dynamic_state[] for
+    * them still holds the old pipeline's static IB (e.g. the dummy blend
+    * constants of a pipeline without color attachments), so they have to be
+    * rebuilt from the current dynamic state even if that state isn't dirty.
+    */
+   uint32_t stale_draw_states;
 
    /* VK_QUERY_PIPELINE_STATISTIC_CLIPPING_INVOCATIONS_BIT and
     * VK_QUERY_TYPE_PRIMITIVES_GENERATED_EXT are allowed to run simultaniously,
