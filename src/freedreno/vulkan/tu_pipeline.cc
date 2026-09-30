@@ -305,7 +305,7 @@ tu_logic_op_reads_dst(VkLogicOp op)
    }
 }
 
-static bool
+bool
 tu_blend_state_is_dual_src(const struct vk_color_blend_state *cb)
 {
    for (unsigned i = 0; i < cb->attachment_count; i++) {

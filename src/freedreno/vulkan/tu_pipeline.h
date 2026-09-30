@@ -329,4 +329,7 @@ tu_fill_render_pass_state(struct vk_render_pass_state *rp,
                           const struct tu_render_pass *pass,
                           const struct tu_subpass *subpass);
 
+bool
+tu_blend_state_is_dual_src(const struct vk_color_blend_state *cb);
+
 #endif /* TU_PIPELINE_H */
