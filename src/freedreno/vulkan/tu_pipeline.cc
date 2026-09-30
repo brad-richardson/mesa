@@ -4626,6 +4626,8 @@ tu_pipeline_builder_build(struct tu_pipeline_builder *builder,
          vk_pipeline_flags_feedback_loops(builder->graphics_state.pipeline_flags);
       gfx_pipeline->feedback_loop_may_involve_textures =
          builder->graphics_state.feedback_loop_not_input_only;
+      gfx_pipeline->dual_src_blend = builder->graphics_state.cb &&
+         tu_blend_state_is_dual_src(builder->graphics_state.cb);
    }
 
    return VK_SUCCESS;

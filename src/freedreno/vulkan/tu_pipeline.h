@@ -264,6 +264,12 @@ struct tu_graphics_pipeline {
 
    VkImageAspectFlags feedback_loops;
    bool feedback_loop_may_involve_textures;
+
+   /* Static color blend state uses a dual-source factor. Static blend state
+    * is baked into draw states and does not reach dynamic_state, so it has
+    * to be recorded here.
+    */
+   bool dual_src_blend;
 };
 
 struct tu_compute_pipeline {
