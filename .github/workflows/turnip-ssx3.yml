@@ -50,9 +50,16 @@ jobs:
         run: |
           set -euo pipefail
           pip install "meson==${MESON_VERSION}" "ninja==${NINJA_VERSION}"
+          # Defeat PATH shadowing (runner images preinstall meson/ninja):
+          # pip's scripts dir goes first, persistently via GITHUB_PATH, and
+          # versions print BEFORE asserting so the log always shows the cause.
+          PYBIN=$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts"))')
+          echo "$PYBIN" >> "$GITHUB_PATH"
+          export PATH="$PYBIN:$PATH"
+          echo "meson: $(meson --version) @ $(command -v meson)"
+          echo "ninja: $(ninja --version) @ $(command -v ninja)"
           [ "$(meson --version)" = "${MESON_VERSION}" ]
           [ "$(ninja --version)" = "${NINJA_VERSION}" ]
-          meson --version; ninja --version
 
       - name: Install pinned NDK r29
         run: |
