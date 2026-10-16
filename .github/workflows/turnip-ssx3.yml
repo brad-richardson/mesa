@@ -1,0 +1,189 @@
+# turnip-ssx3: reproducible Android Turnip build + attested tag release.
+#
+# Builds the ssx3 P1-only Turnip (this branch) for arm64 Android/KGSL with the
+# exact lane recipe (turnip-ci-1 inner_mesa_B.sh on bradflix):
+#   NDK r29, meson 1.5.2, ninja 1.11.1, freedreno-only Vulkan, android-stub.
+# On tag push turnip-ssx3-* the .so + notices ship as release assets with
+# GitHub build-provenance attestation. workflow_dispatch builds without
+# releasing (artifacts only).
+#
+# Byte-reproducibility (load-bearing for the turnip.json SHA pins):
+#  - tu_version.h carries the FIXED string below (same as the pinned lane
+#    build). Changing it changes .so bytes -> re-pin turnip.json.
+#  - .git is removed before configure so meson git-describe cannot leak VCS
+#    state into the binary.
+# If the CI bytes ever differ from the pinned SHA, the build FAILS closed;
+# re-pin tools/ssx3/turnip.json to the attested CI bytes (one-line update).
+name: turnip-ssx3
+
+on:
+  push:
+    tags:
+      - 'turnip-ssx3-*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+env:
+  NDK_REVISION_WANT: 29.0.14206865
+  MESON_VERSION: 1.5.2
+  NINJA_VERSION: 1.11.1
+  SDKVER: '34'
+  TU_VERSION_STRING: turnip-ci-1-B
+  SO_SHA_WANT: c11a65e75a60b90ec8bc544452dca550334f38edb11f9426fa0b481e84baab63
+  JOBS: 8
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pinned build tools
+        run: |
+          set -euo pipefail
+          pip install "meson==${MESON_VERSION}" "ninja==${NINJA_VERSION}"
+          [ "$(meson --version)" = "${MESON_VERSION}" ]
+          [ "$(ninja --version)" = "${NINJA_VERSION}" ]
+          meson --version; ninja --version
+
+      - name: Install pinned NDK r29
+        run: |
+          set -euo pipefail
+          curl -sSL -o /tmp/android-ndk-r29-linux.zip \
+            https://dl.google.com/android/repository/android-ndk-r29-linux.zip
+          sudo unzip -q /tmp/android-ndk-r29-linux.zip -d /opt
+          NDK=/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64/bin
+          REV=$(grep -m1 Pkg.Revision /opt/android-ndk-r29/source.properties)
+          echo "$REV"
+          [ "$REV" = "Pkg.Revision = ${NDK_REVISION_WANT}" ]
+          "$NDK/clang" --version | head -1
+
+      - name: Configure (lane recipe)
+        run: |
+          set -euo pipefail
+          echo "== TUGEN8_DRV_VERSION ${TU_VERSION_STRING}"
+          echo "#define TUGEN8_DRV_VERSION \"${TU_VERSION_STRING}\"" \
+            > ./src/freedreno/vulkan/tu_version.h
+          rm -rf .git
+          NDK=/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64/bin
+          mkdir -p tbin
+          ln -sf "$NDK/clang" tbin/cc
+          ln -sf "$NDK/clang++" tbin/c++
+          export PATH="$PWD/tbin:$NDK:$PATH"
+          export CC=clang CXX=clang++ AR=llvm-ar RANLIB=llvm-ranlib STRIP=llvm-strip
+          export OBJDUMP=llvm-objdump OBJCOPY=llvm-objcopy LDFLAGS="-fuse-ld=lld"
+          cat > android-aarch64.txt <<X
+          [binaries]
+          ar = '$NDK/llvm-ar'
+          c = ['$NDK/aarch64-linux-android${{ env.SDKVER }}-clang']
+          cpp = ['$NDK/aarch64-linux-android${{ env.SDKVER }}-clang++', '-fno-exceptions', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables', '--start-no-unused-arguments', '-static-libstdc++', '--end-no-unused-arguments']
+          c_ld = '$NDK/ld.lld'
+          cpp_ld = '$NDK/ld.lld'
+          strip = '$NDK/llvm-strip'
+          pkg-config = ['env', 'PKG_CONFIG_LIBDIR=$NDK/pkg-config', '/usr/bin/pkg-config']
+
+          [host_machine]
+          system = 'android'
+          cpu_family = 'aarch64'
+          cpu = 'armv8'
+          endian = 'little'
+          X
+          cat > native.txt <<X
+          [build_machine]
+          c = ['clang']
+          cpp = ['clang++']
+          ar = 'llvm-ar'
+          strip = 'llvm-strip'
+          c_ld = 'ld.lld'
+          cpp_ld = 'ld.lld'
+          system = 'linux'
+          cpu_family = 'x86_64'
+          cpu = 'x86_64'
+          endian = 'little'
+          X
+          meson setup build-android-aarch64 \
+            --cross-file android-aarch64.txt \
+            --native-file native.txt \
+            --prefix "$PWD/install-android" \
+            -Dbuildtype=release \
+            -Dstrip=true \
+            -Dplatforms=android \
+            -Dvideo-codecs= \
+            -Dplatform-sdk-version="${SDKVER}" \
+            -Dandroid-stub=true \
+            -Dgallium-drivers= \
+            -Dvulkan-drivers=freedreno \
+            -Dvulkan-beta=true \
+            -Dfreedreno-kmds=kgsl \
+            -Degl=disabled \
+            -Dplatform-sdk-version=36 \
+            -Dandroid-libbacktrace=disabled | tee meson-setup.log
+
+      - name: Build and install
+        run: |
+          set -euo pipefail
+          ninja -j"${JOBS}" -C build-android-aarch64 install | tail -5
+          cp install-android/lib/libvulkan_freedreno.so ./libvulkan_freedreno.so
+          ls -la ./libvulkan_freedreno.so
+          sha256sum ./libvulkan_freedreno.so
+
+      - name: Package notices (deterministic)
+        run: |
+          set -euo pipefail
+          python3 .github/turnip-ssx3/package-notices.py "$PWD" ./turnip-notices.zip
+          sha256sum ./turnip-notices.zip
+          unzip -l ./turnip-notices.zip | tail -2
+
+      - name: Receipt + reproducibility gate
+        run: |
+          set -euo pipefail
+          {
+            echo "drv_version=${TU_VERSION_STRING} patch=P1-only-gralloc-UBWC"
+            echo "git_commit=${GITHUB_SHA}"
+            echo "date=$(date -u +%FT%TZ)"
+            grep -m1 Pkg.Revision /opt/android-ndk-r29/source.properties
+            meson --version; ninja --version
+            ls -la ./libvulkan_freedreno.so ./turnip-notices.zip
+            sha256sum ./libvulkan_freedreno.so ./turnip-notices.zip
+            strings -a ./libvulkan_freedreno.so | grep -E "Mesa [0-9]|turnip-ci" | sort -u
+          } | tee BUILD-RECEIPT.txt
+          GOT=$(sha256sum ./libvulkan_freedreno.so | cut -d' ' -f1)
+          [ "$GOT" = "${SO_SHA_WANT}" ] || {
+            echo "REPRODUCIBILITY FAIL: $GOT != ${SO_SHA_WANT}" >&2
+            echo "re-pin tools/ssx3/turnip.json to the attested bytes" >&2
+            exit 1
+          }
+          echo "REPRODUCIBLE: $GOT"
+
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'libvulkan_freedreno.so, turnip-notices.zip'
+
+      - name: Upload release assets (tag only)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --title "$TAG" \
+              --notes "ssx3 P1-only Turnip (${GITHUB_SHA}). Verify: tools/ssx3/verify-turnip.sh in brad-richardson/PS2Recomp."
+          gh release upload "$TAG" ./libvulkan_freedreno.so ./turnip-notices.zip BUILD-RECEIPT.txt --clobber
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: turnip-ssx3
+          path: |
+            libvulkan_freedreno.so
+            turnip-notices.zip
+            BUILD-RECEIPT.txt
