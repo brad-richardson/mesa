@@ -59,7 +59,10 @@ jobs:
           echo "meson: $(meson --version) @ $(command -v meson)"
           echo "ninja: $(ninja --version) @ $(command -v ninja)"
           [ "$(meson --version)" = "${MESON_VERSION}" ]
-          [ "$(ninja --version)" = "${NINJA_VERSION}" ]
+          # PyPI ninja 1.11.1's binary reports 1.11.1.git.kitware.jobserver-1:
+          # prefix-match (a different ninja series still fails closed).
+          case "$(ninja --version)" in "${NINJA_VERSION}"*) ;; *)
+            echo "ninja version mismatch" >&2; exit 1 ;; esac
 
       - name: Install pinned NDK r29
         run: |
